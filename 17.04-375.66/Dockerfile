@@ -1,6 +1,21 @@
 FROM ubuntu:17.04
 
 LABEL maintainer="Alexandre Buisine <alexandrejabuisine@gmail.com>"
+LABEL version="17.04-375.66-1"
+
+# install python modules for monitoring
+RUN DEBIAN_FRONTEND=noninteractive apt-get -qq update \
+ && apt-get install -yqq --no-install-recommends \
+	python \
+	python-pip \
+	python-wheel \
+	python-setuptools \
+ && pip install nvidia-ml-py \
+ && pip install prometheus_client \
+ && apt-get -yqq remove --purge python-pip \
+ && apt-get -yqq autoremove --purge \
+ && apt-get -yqq clean \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY resources/etc/OpenCL/vendors/nvidia.icd /etc/OpenCL/vendors/nvidia.icd
 COPY resources/usr/bin/nvidia-smi /usr/bin/nvidia-smi
