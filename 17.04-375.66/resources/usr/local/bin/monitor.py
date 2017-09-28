@@ -15,24 +15,12 @@ import json
 
 from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
 from prometheus_client import start_http_server, core
+from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily, REGISTRY
 
 from pynvml import *
 
 
-log = logging.getLogger('nvidia-tool')
-
-CLAYMORE_API_CALL_GETSTAT		= {'id':0, 'jsonrpc':"2.0", 'method':"miner_getstat1"}
-
-# [u'9.8 - ETH', u'949', u'26642;328;0', u'26642', u'0;0;0', u'off', u'64;48', u'eu1.ethermine.org:4444', u'0;0;0;0']
-CLAYMORE_API_RESULT_VERSION				= 0
-CLAYMORE_API_RESULT_UPTIME				= 1
-CLAYMORE_API_RESULT_ETH_SHARES_TOTAL	= 2
-CLAYMORE_API_RESULT_ETH_SHARES_ONE		= 3
-CLAYMORE_API_RESULT_DCH_SHARES_TOTAL	= 4
-CLAYMORE_API_RESULT_DCH_SHARES_ONE		= 5
-CLAYMORE_API_RESULT_TEMP_FAN			= 6
-CLAYMORE_API_RESULT_POOLS				= 7
-CLAYMORE_API_RESULT_EVENTS				= 8
+log = logging.getLogger('prometheus-nvidia-exporter')
 
 def _create_parser():
 	parser = argparse.ArgumentParser(description='nVidia GPU Prometheus Metrics Exporter')
@@ -63,124 +51,159 @@ def _create_parser():
 						help='Claymore API tcp port',
 						type=int,
 						default=3333)
-
-
-
 	return parser
 
-def getNVMLData(args, nvml_device):
-	data = {}
-	try:
-		log.debug('Querying for ID information...')
-		data['gpu_uuid'] = nvmlDeviceGetUUID(nvml_device)
-		data['pci_bus_id'] = nvmlDeviceGetPciInfo(nvml_device).busId
-		log.debug('Device is %s', data['gpu_uuid'])
+class NVMLCollector(object):
 
-		log.debug('Querying for clocks information...')
-		data['clock_gpu_hz']	= nvmlDeviceGetClockInfo(nvml_device, NVML_CLOCK_GRAPHICS) * 1000000
-		data['clock_mem_hz']	= nvmlDeviceGetClockInfo(nvml_device, NVML_CLOCK_MEM) * 1000000
+	def __init__(self, labels, device):
+		self.labels	= labels
+		self.device	= device
 
-		log.debug('Querying for temperature information...')
-		data['gpu_temperature_c']	= nvmlDeviceGetTemperature(nvml_device, NVML_TEMPERATURE_GPU)
+		self.prefix		= 'nvml_'
+		self.prefix_s	= 'NVML '
 
-		log.debug('Querying for fan information...')
-		data['fan_speed_percent']	= nvmlDeviceGetFanSpeed(nvml_device)
+	def collect(self):
+		try:
+			log.debug('Querying for clocks information...')
+			metric = GaugeMetricFamily(self.prefix + 'clock_gpu_hz', self.prefix_s + "GPU clock", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), nvmlDeviceGetClockInfo(self.device, NVML_CLOCK_GRAPHICS) * 1000000)
+			yield metric
+			metric = GaugeMetricFamily(self.prefix + 'clock_mem_hz', self.prefix_s + "MEM clock", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), nvmlDeviceGetClockInfo(self.device, NVML_CLOCK_MEM) * 1000000)
+			yield metric
 
-		log.debug('Querying for power information...')
-		data['power_draw_watt']	= nvmlDeviceGetPowerUsage(nvml_device) / 1000.0
-		data['power_state'] 	= nvmlDeviceGetPowerState(nvml_device)
+			log.debug('Querying for temperature information...')
+			metric = GaugeMetricFamily(self.prefix + 'gpu_temperature_c', self.prefix_s + "GPU temperature", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), nvmlDeviceGetTemperature(self.device, NVML_TEMPERATURE_GPU))
+			yield metric
 
-		log.debug('Querying for memory information...')
-		mem_info = nvmlDeviceGetMemoryInfo(nvml_device)
-		data['memory_total_bytes']	= mem_info.total
-		data['memory_used_bytes']	= mem_info.used
+			log.debug('Querying for fan information...')
+			metric = GaugeMetricFamily(self.prefix + 'fan_speed_percent', self.prefix_s + "fan speed", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), nvmlDeviceGetFanSpeed(self.device))
+			yield metric
 
-	except Exception as e:
-		log.warning(e, exc_info=True)
+			log.debug('Querying for power information...')
+			metric = GaugeMetricFamily(self.prefix + 'power_draw_watt', self.prefix_s + "power draw", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), nvmlDeviceGetPowerUsage(self.device) / 1000.0)
+			yield metric
+			metric = GaugeMetricFamily(self.prefix + 'power_state', self.prefix_s + "power state", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), nvmlDeviceGetPowerState(self.device))
+			yield metric
 
-	return data
+			log.debug('Querying for memory information...')
+			mem_info = nvmlDeviceGetMemoryInfo(self.device)
+			metric = GaugeMetricFamily(self.prefix + 'memory_total_bytes', self.prefix_s + "total memory", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), mem_info.total)
+			yield metric
+			metric = GaugeMetricFamily(self.prefix + 'memory_used_bytes', self.prefix_s + "used memory", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), mem_info.used)
+			yield metric
+		except Exception as e:
+			log.warning(e, exc_info=True)
 
-def getClaymoreAPIData(args):
-	data = {}
 
-	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	response_data = None
-	try:
-		log.debug('Connecting to claymore ...')
-		s.connect((args.claymore_host, args.claymore_port))
-		log.debug('Sending signing request to the server')
-		s.sendall(json.dumps(CLAYMORE_API_CALL_GETSTAT))
-		log.debug('Waiting for server response')
-		response_data = s.recv(10 * 1024)
-		log.debug('Got server response')
-	except socket.error as e:
-		log.debug('Claymore not available: %s', e)
-	finally:
-		s.close()
 
-	if ( not response_data ):
-		return None
+class ClaymoreCollector(object):
+	CLAYMORE_API_CALL_GETSTAT		= {'id':0, 'jsonrpc':"2.0", 'method':"miner_getstat1"}
 
-	try:
-		log.debug('Parsing JSON response')
-		response = json.loads(response_data)
+	# [u'9.8 - ETH', u'949', u'26642;328;0', u'26642', u'0;0;0', u'off', u'64;48', u'eu1.ethermine.org:4444', u'0;0;0;0']
+	CLAYMORE_API_RESULT_VERSION				= 0
+	CLAYMORE_API_RESULT_UPTIME				= 1
+	CLAYMORE_API_RESULT_ETH_SHARES_TOTAL	= 2
+	CLAYMORE_API_RESULT_ETH_SHARES_ONE		= 3
+	CLAYMORE_API_RESULT_DCH_SHARES_TOTAL	= 4
+	CLAYMORE_API_RESULT_DCH_SHARES_ONE		= 5
+	CLAYMORE_API_RESULT_TEMP_FAN			= 6
+	CLAYMORE_API_RESULT_POOLS				= 7
+	CLAYMORE_API_RESULT_EVENTS				= 8
 
-		data['version'] = response['result'][CLAYMORE_API_RESULT_VERSION]
+	def __init__(self, labels, hostname, port):
+		self.labels		= labels
+		self.hostname	= hostname
+		self.port		= port
 
-		pools_s = response['result'][CLAYMORE_API_RESULT_POOLS].split(';', 2)
-		data['eth_pool_current'] = pools_s[0]
-		data['dcr_pool_current'] = pools_s[1] if len(pools_s) >= 2 else None
+		self.prefix		= 'claymore_'
+		self.prefix_s	= 'Claymore '
 
-		data['uptime_minutes'] = response['result'][CLAYMORE_API_RESULT_UPTIME]
+	def getAPIStat(self):
+		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		try:
+			log.debug('Connecting to claymore ...')
+			s.connect((self.hostname, self.port))
+			log.debug('Sending signing request to the server')
+			s.sendall(json.dumps(self.CLAYMORE_API_CALL_GETSTAT))
+			log.debug('Waiting for server response')
+			response = s.recv(10 * 1024)
+			log.debug('Parsing JSON response')
+			stat = json.loads(response)
+		except socket.error as e:
+			log.info('Claymore not available: %s', e)
+			return None
+		finally:
+			s.close()
+		return stat['result']
 
-		eth_hashrate_total_mhs, eth_shares_accepted, eth_shares_rejected = response['result'][CLAYMORE_API_RESULT_ETH_SHARES_TOTAL].split(';', 3)
-		data['eth_hashrate_total_mhs']	= eth_hashrate_total_mhs
-		data['eth_shares_accepted']		= eth_shares_accepted
-		data['eth_shares_rejected']		= eth_shares_rejected
+	def collect(self):
+		stat = self.getAPIStat()
 
-		gpu_temperature_c, fan_speed_percent = response['result'][CLAYMORE_API_RESULT_TEMP_FAN].split(';', 2)
-		data['gpu_temperature_c']		= gpu_temperature_c
-		data['fan_speed_percent']	= fan_speed_percent
+		if ( not stat ):
+			return
 
-		eth_shares_invalid, eth_pool_switches, dcr_shares_invalid, dcr_pool_switches = response['result'][CLAYMORE_API_RESULT_EVENTS].split(';', 4)
-		data['eth_shares_invalid']		= eth_shares_invalid
-		data['eth_pool_switches']		= eth_pool_switches
-		data['dcr_shares_invalid']		= dcr_shares_invalid
-		data['dcr_pool_switches']		= dcr_pool_switches
+		try:
+			#LABELS
+			self.labels['version'] = stat[self.CLAYMORE_API_RESULT_VERSION]
 
-	except Exception as e:
-		print e
+			pools_s = stat[self.CLAYMORE_API_RESULT_POOLS].split(';', 2)
+			self.labels['eth_pool_current'] = pools_s[0]
+			# self.labels['dcr_pool_current'] = pools_s[1] if len(pools_s) >= 2 else None
 
-	return data
+			#COUNTERS
+			metric = CounterMetricFamily(self.prefix + 'uptime_minutes', self.prefix_s + "uptime", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), float(stat[self.CLAYMORE_API_RESULT_UPTIME]))
+			yield metric
+
+			eth_shares_invalid, eth_pool_switches, dcr_shares_invalid, dcr_pool_switches = stat[self.CLAYMORE_API_RESULT_EVENTS].split(';', 4)
+			metric = CounterMetricFamily(self.prefix + 'eth_shares_invalid', self.prefix_s + "ETH invalid shares", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), float(eth_shares_invalid))
+			yield metric
+			metric = CounterMetricFamily(self.prefix + 'eth_pool_switches', self.prefix_s + "ETH pool swithes", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), float(eth_pool_switches))
+			yield metric
+			# metric = CounterMetricFamily(self.prefix + 'dcr_shares_invalid', self.prefix_s + "DCR invalid shares", labels=self.labels.keys())
+			# metric.add_metric(self.labels.values(), dcr_shares_invalid)
+			# yield metric
+			# metric = CounterMetricFamily(self.prefix + 'dcr_pool_switches', self.prefix_s + "DCR pool swithes", labels=self.labels.keys())
+			# metric.add_metric(self.labels.values(), dcr_pool_switches)
+			# yield metric
+
+			eth_hashrate_total_mhs, eth_shares_accepted, eth_shares_rejected = stat[self.CLAYMORE_API_RESULT_ETH_SHARES_TOTAL].split(';', 3)
+			metric = CounterMetricFamily(self.prefix + 'eth_shares_accepted', self.prefix_s + "ETH accepted shares", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), float(eth_shares_accepted))
+			yield metric
+			metric = CounterMetricFamily(self.prefix + 'eth_shares_rejected', self.prefix_s + "ETH rejected shares", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), float(eth_shares_rejected))
+			yield metric
+
+			#GAUGES
+			metric = GaugeMetricFamily(self.prefix + 'eth_hashrate_total_mhs', self.prefix_s + "ETH total hashrate", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), float(eth_hashrate_total_mhs))
+			yield metric
+			gpu_temperature_c, fan_speed_percent = stat[self.CLAYMORE_API_RESULT_TEMP_FAN].split(';', 2)
+			metric = GaugeMetricFamily(self.prefix + 'gpu_temperature_c', self.prefix_s + "GPU temperature", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), float(gpu_temperature_c))
+			yield metric
+			metric = GaugeMetricFamily(self.prefix + 'fan_speed_percent', self.prefix_s + "GPU fan speed", labels=self.labels.keys())
+			metric.add_metric(self.labels.values(), float(fan_speed_percent))
+			yield metric
+
+		except Exception as e:
+			log.warning(e, exc_info=True)
+
 
 def main():
 	parser = _create_parser()
 	args = parser.parse_args()
 	logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
-    
-	registry = core.REGISTRY
-
-	nvml_sensors = {
-		'gpu_temperature_c':	Gauge('nvml_gpu_temperature_c',		"NVML GPU temperature",	['gpu_uuid', 'pci_bus_id'],	registry=registry),
-		'memory_total_bytes':	Gauge('nvml_memory_total_bytes',	"NVML total memory",	['gpu_uuid', 'pci_bus_id'],	registry=registry),
-		'memory_used_bytes':	Gauge('nvml_memory_used_bytes',		"NVML used memory",		['gpu_uuid', 'pci_bus_id'],	registry=registry),
-		'fan_speed_percent':	Gauge('nvml_fan_speed_percent',		"NVML fan speed",		['gpu_uuid', 'pci_bus_id'],	registry=registry),
-		'power_draw_watt':		Gauge('nvml_power_draw_watt',		"NVML power draw",		['gpu_uuid', 'pci_bus_id'],	registry=registry),
-		'clock_gpu_hz':			Gauge('nvml_clock_gpu_hz',			"NVML GPU clock",		['gpu_uuid', 'pci_bus_id'],	registry=registry),
-		'clock_mem_hz':			Gauge('nvml_clock_mem_hz',			"NVML MEM clock",		['gpu_uuid', 'pci_bus_id'],	registry=registry),
-		'power_state':			Gauge('nvml_power_state',			"NVML power state",		['gpu_uuid', 'pci_bus_id'],	registry=registry)
-		}
-
-	claymore_sensors = {
-		'uptime_minutes':			Counter('claymore_uptime_minutes',			"Claymore uptime",				['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'eth_shares_accepted':		Counter('claymore_eth_shares_accepted',		"Claymore ETH accepted shares",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'eth_shares_rejected':		Counter('claymore_eth_shares_rejected',		"Claymore ETH rejected shares",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'eth_shares_invalid':		Counter('claymore_eth_shares_invalid',		"Claymore ETH invalid shares",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'eth_pool_switches':		Counter('claymore_eth_pool_switches',		"Claymore ETH pool swithes",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'eth_hashrate_total_mhs':	Gauge('claymore_eth_hashrate_total_mhs',	"Claymore ETH total hashrate",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'gpu_temperature_c':		Gauge('claymore_gpu_temperature_c',			"Claymore GPU temperature",		['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'fan_speed_percent':		Gauge('claymore_fan_speed_percent',			"Claymore GPU fan speed",		['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry)
-		}
 
 	try:
 		log.debug('Initializing NVML...')
@@ -192,8 +215,15 @@ def main():
 		log.debug('Obtaining device ...')
 		nvml_device = nvmlDeviceGetHandleByIndex(0)
 
-		# device_count = nvmlDeviceGetCount()
-		# log.debug('%d devices found.', device_count)
+		log.debug('Querying for ID information...')
+		labels = {
+			'gpu_uuid':		nvmlDeviceGetUUID(nvml_device),
+			'pci_bus_id':	nvmlDeviceGetPciInfo(nvml_device).busId
+			}
+		log.debug('Device is %s', labels['gpu_uuid'])
+
+		REGISTRY.register(NVMLCollector(labels, nvml_device))
+		REGISTRY.register(ClaymoreCollector(labels, args.claymore_host, args.claymore_port))
 
 		if args.port:
 			log.debug('Starting http server on port %d', args.port)
@@ -201,19 +231,10 @@ def main():
 			log.info('HTTP server started on port %d', args.port)
 
 		while True:
-			nvml_data		= getNVMLData(args, nvml_device)
-			for key in nvml_sensors:
-				nvml_sensors[key].labels(gpu_uuid=nvml_data['gpu_uuid'], pci_bus_id=nvml_data['pci_bus_id']).set(nvml_data[key])
-
-			claymore_data	= getClaymoreAPIData(args)
-			if (claymore_data):
-				for key in claymore_sensors:
-					claymore_sensors[key].labels(gpu_uuid=nvml_data['gpu_uuid'], pci_bus_id=nvml_data['pci_bus_id'], claymore_version=claymore_data['version'], eth_pool=claymore_data['eth_pool_current']).set(claymore_data[key])
-
 			if args.gateway:
 				log.debug('Pushing metrics to gateway at %s...', args.gateway)
 				hostname = platform.node()
-				push_to_gateway(args.gateway, job=hostname, registry=core.REGISTRY)
+				push_to_gateway(args.gateway, job=hostname, registry=REGISTRY)
 				log.debug('Push complete.')
 
 			time.sleep(args.update_period)
