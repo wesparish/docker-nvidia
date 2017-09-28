@@ -1,7 +1,7 @@
 FROM ubuntu:17.04
 
 LABEL maintainer="Alexandre Buisine <alexandrejabuisine@gmail.com>"
-LABEL version="17.04-375.66-2"
+LABEL version="17.04-375.66-3"
 LABEL com.prometheus.monitoring="true" com.prometheus.port="9090"
 
 # install python modules for monitoring
