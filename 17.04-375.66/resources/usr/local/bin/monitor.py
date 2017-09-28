@@ -172,11 +172,11 @@ def main():
 		}
 
 	claymore_sensors = {
-		'uptime_minutes':			Gauge('claymore_uptime_minutes',			"Claymore uptime",				['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'eth_shares_accepted':		Gauge('claymore_eth_shares_accepted',		"Claymore ETH accepted shares",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'eth_shares_rejected':		Gauge('claymore_eth_shares_rejected',		"Claymore ETH rejected shares",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'eth_shares_invalid':		Gauge('claymore_eth_shares_invalid',		"Claymore ETH invalid shares",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
-		'eth_pool_switches':		Gauge('claymore_eth_pool_switches',		"Claymore ETH pool swithes",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
+		'uptime_minutes':			Counter('claymore_uptime_minutes',			"Claymore uptime",				['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
+		'eth_shares_accepted':		Counter('claymore_eth_shares_accepted',		"Claymore ETH accepted shares",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
+		'eth_shares_rejected':		Counter('claymore_eth_shares_rejected',		"Claymore ETH rejected shares",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
+		'eth_shares_invalid':		Counter('claymore_eth_shares_invalid',		"Claymore ETH invalid shares",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
+		'eth_pool_switches':		Counter('claymore_eth_pool_switches',		"Claymore ETH pool swithes",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
 		'eth_hashrate_total_mhs':	Gauge('claymore_eth_hashrate_total_mhs',	"Claymore ETH total hashrate",	['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
 		'gpu_temperature_c':		Gauge('claymore_gpu_temperature_c',			"Claymore GPU temperature",		['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry),
 		'fan_speed_percent':		Gauge('claymore_fan_speed_percent',			"Claymore GPU fan speed",		['gpu_uuid', 'pci_bus_id', 'claymore_version', 'eth_pool'],	registry=registry)
