@@ -19,6 +19,7 @@ from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily, REGIS
 
 from pynvml import *
 
+import MinerCollector
 
 log = logging.getLogger('prometheus-nvidia-exporter')
 
@@ -43,12 +44,12 @@ def _create_parser():
 						type=int,
 						default=0)
 
-	parser.add_argument('-ch', '--claymore-host',
-						help='Claymore API hostname',
+	parser.add_argument('-mh', '--miner-host',
+						help='miner API hostname',
 						default="localhost")
 
-	parser.add_argument('-cp', '--claymore-port',
-						help='Claymore API tcp port',
+	parser.add_argument('-mp', '--miner-port',
+						help='miner API tcp port',
 						type=int,
 						default=3333)
 	return parser
@@ -101,105 +102,6 @@ class NVMLCollector(object):
 		except Exception as e:
 			log.warning(e, exc_info=True)
 
-
-
-class ClaymoreCollector(object):
-	CLAYMORE_API_CALL_GETSTAT		= {'id':0, 'jsonrpc':"2.0", 'method':"miner_getstat1"}
-
-	# [u'9.8 - ETH', u'949', u'26642;328;0', u'26642', u'0;0;0', u'off', u'64;48', u'eu1.ethermine.org:4444', u'0;0;0;0']
-	CLAYMORE_API_RESULT_VERSION				= 0
-	CLAYMORE_API_RESULT_UPTIME				= 1
-	CLAYMORE_API_RESULT_ETH_SHARES_TOTAL	= 2
-	CLAYMORE_API_RESULT_ETH_SHARES_ONE		= 3
-	CLAYMORE_API_RESULT_DCH_SHARES_TOTAL	= 4
-	CLAYMORE_API_RESULT_DCH_SHARES_ONE		= 5
-	CLAYMORE_API_RESULT_TEMP_FAN			= 6
-	CLAYMORE_API_RESULT_POOLS				= 7
-	CLAYMORE_API_RESULT_EVENTS				= 8
-
-	def __init__(self, labels, hostname, port):
-		self.labels		= labels
-		self.hostname	= hostname
-		self.port		= port
-
-		self.prefix		= 'claymore_'
-		self.prefix_s	= 'Claymore '
-
-	def getAPIStat(self):
-		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		try:
-			log.debug('Connecting to claymore ...')
-			s.connect((self.hostname, self.port))
-			log.debug('Sending signing request to the server')
-			s.sendall(json.dumps(self.CLAYMORE_API_CALL_GETSTAT))
-			log.debug('Waiting for server response')
-			response = s.recv(10 * 1024)
-			log.debug('Parsing JSON response')
-			stat = json.loads(response)
-		except socket.error as e:
-			log.info('Claymore not available: %s', e)
-			return None
-		finally:
-			s.close()
-		return stat['result']
-
-	def collect(self):
-		stat = self.getAPIStat()
-
-		if ( not stat ):
-			return
-
-		try:
-			#LABELS
-			self.labels['version'] = stat[self.CLAYMORE_API_RESULT_VERSION]
-
-			pools_s = stat[self.CLAYMORE_API_RESULT_POOLS].split(';', 2)
-			self.labels['eth_pool_current'] = pools_s[0]
-			# self.labels['dcr_pool_current'] = pools_s[1] if len(pools_s) >= 2 else None
-
-			#COUNTERS
-			metric = CounterMetricFamily(self.prefix + 'uptime_minutes', self.prefix_s + "uptime", labels=self.labels.keys())
-			metric.add_metric(self.labels.values(), float(stat[self.CLAYMORE_API_RESULT_UPTIME]))
-			yield metric
-
-			eth_shares_invalid, eth_pool_switches, dcr_shares_invalid, dcr_pool_switches = stat[self.CLAYMORE_API_RESULT_EVENTS].split(';', 4)
-			metric = CounterMetricFamily(self.prefix + 'eth_shares_invalid', self.prefix_s + "ETH invalid shares", labels=self.labels.keys())
-			metric.add_metric(self.labels.values(), float(eth_shares_invalid))
-			yield metric
-			metric = CounterMetricFamily(self.prefix + 'eth_pool_switches', self.prefix_s + "ETH pool swithes", labels=self.labels.keys())
-			metric.add_metric(self.labels.values(), float(eth_pool_switches))
-			yield metric
-			# metric = CounterMetricFamily(self.prefix + 'dcr_shares_invalid', self.prefix_s + "DCR invalid shares", labels=self.labels.keys())
-			# metric.add_metric(self.labels.values(), dcr_shares_invalid)
-			# yield metric
-			# metric = CounterMetricFamily(self.prefix + 'dcr_pool_switches', self.prefix_s + "DCR pool swithes", labels=self.labels.keys())
-			# metric.add_metric(self.labels.values(), dcr_pool_switches)
-			# yield metric
-
-			eth_hashrate_total_mhs, eth_shares_accepted, eth_shares_rejected = stat[self.CLAYMORE_API_RESULT_ETH_SHARES_TOTAL].split(';', 3)
-			metric = CounterMetricFamily(self.prefix + 'eth_shares_accepted', self.prefix_s + "ETH accepted shares", labels=self.labels.keys())
-			metric.add_metric(self.labels.values(), float(eth_shares_accepted))
-			yield metric
-			metric = CounterMetricFamily(self.prefix + 'eth_shares_rejected', self.prefix_s + "ETH rejected shares", labels=self.labels.keys())
-			metric.add_metric(self.labels.values(), float(eth_shares_rejected))
-			yield metric
-
-			#GAUGES
-			metric = GaugeMetricFamily(self.prefix + 'eth_hashrate_total_mhs', self.prefix_s + "ETH total hashrate", labels=self.labels.keys())
-			metric.add_metric(self.labels.values(), float(eth_hashrate_total_mhs))
-			yield metric
-			gpu_temperature_c, fan_speed_percent = stat[self.CLAYMORE_API_RESULT_TEMP_FAN].split(';', 2)
-			metric = GaugeMetricFamily(self.prefix + 'gpu_temperature_c', self.prefix_s + "GPU temperature", labels=self.labels.keys())
-			metric.add_metric(self.labels.values(), float(gpu_temperature_c))
-			yield metric
-			metric = GaugeMetricFamily(self.prefix + 'fan_speed_percent', self.prefix_s + "GPU fan speed", labels=self.labels.keys())
-			metric.add_metric(self.labels.values(), float(fan_speed_percent))
-			yield metric
-
-		except Exception as e:
-			log.warning(e, exc_info=True)
-
-
 def main():
 	parser = _create_parser()
 	args = parser.parse_args()
@@ -223,7 +125,7 @@ def main():
 		log.debug('Device is %s', labels['gpu_uuid'])
 
 		REGISTRY.register(NVMLCollector(labels, nvml_device))
-		REGISTRY.register(ClaymoreCollector(labels, args.claymore_host, args.claymore_port))
+		REGISTRY.register(MinerCollector.MinerCollector(labels, args.miner_host, args.miner_port))
 
 		if args.port:
 			log.debug('Starting http server on port %d', args.port)
