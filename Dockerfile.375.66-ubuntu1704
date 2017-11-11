@@ -3,7 +3,7 @@ FROM ubuntu:17.04
 LABEL maintainer="Alexandre Buisine <alexandrejabuisine@gmail.com>" \
 	com.prometheus.monitoring="true" \
 	com.prometheus.port="9090" \
-	version="375.66-ubuntu1704-1"
+	version="375.66-ubuntu1704-2"
 
 # install python modules for monitoring
 RUN DEBIAN_FRONTEND=noninteractive apt-get -qq update \

@@ -3,7 +3,7 @@ FROM ubuntu:16.04
 LABEL maintainer="Alexandre Buisine <alexandrejabuisine@gmail.com>" \
 	com.prometheus.monitoring="true" \
 	com.prometheus.port="9090" \
-	version="375.66-ubuntu1604-1"
+	version="375.66-ubuntu1604-2"
 
 COPY resources/etc/OpenCL/vendors/nvidia.icd /etc/OpenCL/vendors/nvidia.icd
 COPY resources/usr/bin/nvidia-smi /usr/bin/nvidia-smi
