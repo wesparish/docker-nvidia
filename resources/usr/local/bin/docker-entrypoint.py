@@ -11,6 +11,7 @@ import platform
 
 import socket
 import os
+import urllib2
 import json
 import importlib
 
@@ -59,7 +60,7 @@ def _create_parser():
 						required=True)
 	return parser
 
-def collect(args, Miner):
+def collect(Miner, args):
 	log.debug('initializing NVML...')
 	nvmlInit()
 
@@ -92,6 +93,18 @@ def collect(args, Miner):
 
 		time.sleep(args.update_period)
 
+
+def getHostMetadata():
+	try:
+		req = urllib2.Request('http://rancher-metadata/2015-12-19/self/host')
+		req.add_header('Accept', 'application/json')
+		resp = urllib2.urlopen(req)
+		metadata = json.loads(resp.read())
+	except socket.error as e:
+		log.info('not able to get metadata: %s', e)
+		return None
+	return metadata
+
 def main():
 	parser = _create_parser()
 	args = parser.parse_args()
@@ -100,13 +113,34 @@ def main():
 	Miner = importlib.import_module(args.miner_module, package=None)
 
 	try:
+		log.debug('initializing NVML...')
+		nvmlInit()
+
+		log.info('started with nVidia driver version = %s', nvmlSystemGetDriverVersion())
+
+		log.debug('obtaining device ...')
+		nvml_device = nvmlDeviceGetHandleByIndex(0)
+
+		gpu_uuid = nvmlDeviceGetUUID(nvml_device)
+		log.info('device is %s', gpu_uuid)
+
+		gpu_uuid_short = gpu_uuid.split('-')[-1]
+
+		metadata = getHostMetadata()
+
+		key = "gpu%s-mW"%gpu_uuid_short
+		if key in metadata['labels']:
+			mW = int(metadata['labels'][key])
+			log.info('setting new power limit: %dmW', mW)
+			nvmlDeviceSetPowerManagementLimit(nvml_device, mW)
+
 		pid = os.fork()
 
 		if ( pid == 0 ):
 			log.info('collect as a child process %d'%os.getpid())
-			collect(args, Miner)
+			collect(Miner, args)
 
-		Miner.launch(args)
+		Miner.launch(args, metadata, gpu_uuid_short)
 
 	except Exception as e:
 		log.error('Exception thrown - %s', e, exc_info=True)

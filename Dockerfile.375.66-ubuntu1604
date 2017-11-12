@@ -3,7 +3,7 @@ FROM ubuntu:16.04
 LABEL maintainer="Alexandre Buisine <alexandrejabuisine@gmail.com>" \
 	com.prometheus.monitoring="true" \
 	com.prometheus.port="9090" \
-	version="375.66-ubuntu1604-3"
+	version="375.66-ubuntu1604-4"
 
 # install python modules for monitoring
 RUN DEBIAN_FRONTEND=noninteractive apt-get -qq update \
@@ -46,4 +46,4 @@ RUN ln -s /usr/lib/x86_64-linux-gnu/libcuda.so.375.66 /usr/lib/x86_64-linux-gnu/
  && ldconfig
 
 ENTRYPOINT [ "/usr/local/bin/docker-entrypoint.py" ]
-CMD [ '--collector-port', '9090' ]
+CMD [ "--collector-port", "9090" ]
