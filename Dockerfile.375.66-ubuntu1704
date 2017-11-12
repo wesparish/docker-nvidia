@@ -3,7 +3,7 @@ FROM ubuntu:17.04
 LABEL maintainer="Alexandre Buisine <alexandrejabuisine@gmail.com>" \
 	com.prometheus.monitoring="true" \
 	com.prometheus.port="9090" \
-	version="375.66-ubuntu1704-2"
+	version="375.66-ubuntu1704-3"
 
 # install python modules for monitoring
 RUN DEBIAN_FRONTEND=noninteractive apt-get -qq update \
@@ -30,9 +30,11 @@ COPY resources/usr/lib/x86_64-linux-gnu/libcuda.so.375.66 \
  resources/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.375.66 \
  resources/usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.375.66 \
  /usr/lib/x86_64-linux-gnu/
-COPY resources/usr/local/bin/monitor.py /usr/local/bin/
+COPY resources/usr/local/bin/docker-entrypoint.py \
+ resources/usr/local/bin/NVMLCollector.py \
+ /usr/local/bin/
 
-RUN chmod +x /usr/local/bin/monitor.py
+RUN chmod +x /usr/local/bin/docker-entrypoint.py
 
 RUN ln -s /usr/lib/x86_64-linux-gnu/libcuda.so.375.66 /usr/lib/x86_64-linux-gnu/libcuda.so.1 \
  && ln -s /usr/lib/x86_64-linux-gnu/libnvidia-opencl.so.375.66 /usr/lib/x86_64-linux-gnu/libnvidia-opencl.so.1 \
@@ -42,3 +44,6 @@ RUN ln -s /usr/lib/x86_64-linux-gnu/libcuda.so.375.66 /usr/lib/x86_64-linux-gnu/
  && ln -s /usr/lib/x86_64-linux-gnu/libOpenCL.so.1.0 /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
  && ln -s /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 /usr/lib/x86_64-linux-gnu/libOpenCL.so \
  && ldconfig
+
+ENTRYPOINT [ "/usr/local/bin/docker-entrypoint.py" ]
+CMD [ '--collector-port', '9090' ]
