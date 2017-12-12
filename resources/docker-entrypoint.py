@@ -128,9 +128,11 @@ def main():
 
 		metadata = getHostMetadata()
 
-		key = "gpu%s-mW"%gpu_uuid_short
+		key = "coolbits-%s"%gpu_uuid_short
 		if key in metadata['labels']:
-			mW = int(metadata['labels'][key])
+			coolbits = metadata['labels'][key].split(',')
+
+			mW = int(coolbits[0])
 			log.info('setting new power limit: %dmW', mW)
 			nvmlDeviceSetPowerManagementLimit(nvml_device, mW)
 
