@@ -75,7 +75,8 @@ def collect(Miner, args):
 		'gpu_uuid':		nvmlDeviceGetUUID(nvml_device) ,
 		'pci_bus_id':	nvmlDeviceGetPciInfo(nvml_device).busId
 		}
-	log.debug('device is %s', labels['gpu_uuid'])
+	device_name = nvmlDeviceGetName(nvml_device)
+	log.info('%s is a %s', labels['gpu_uuid'], device_name)
 
 	REGISTRY.register(NVMLCollector.NVMLCollector(labels, nvml_device))
 	REGISTRY.register(Miner.MinerCollector(labels, args.miner_host, args.miner_port))
